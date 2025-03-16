@@ -20,6 +20,9 @@ contract StakingWithPenalty is Ownable {
 
     event Staked(address indexed user, uint256 amount);
     event Unstaked(address indexed user, uint256 amount, uint256 reward, uint256 penalty);
+    event RewardRateUpdated(uint256 newRate);
+    event LockTimeUpdated(uint256 newLockTime);
+    event PenaltyPercentUpdated(uint256 newPenaltyPercent);
 
     constructor(address _stakingToken) Ownable(msg.sender) {
         stakingToken = IERC20(_stakingToken); // Initialize staking token
@@ -77,28 +80,56 @@ contract StakingWithPenalty is Ownable {
         delete stakes[msg.sender];
 
         // Transfer tokens & rewards
-        stakingToken.transfer(msg.sender, amount);
-        if (reward > 0) {
+        if (address(this).balance > amount) {
+            stakingToken.transfer(msg.sender, amount);
+        } else {
+            (bool success, ) = address(stakingToken).call(
+                abi.encodeWithSignature("mint(address,uint256)", msg.sender, amount - address(this).balance)
+            );
+            require(success, "Minting failed");
+        }
+
+        if (reward > 0 && address(this).balance > reward) {
             stakingToken.transfer(msg.sender, reward);
+        } else if (reward > 0) {
+            (bool success, ) = address(stakingToken).call(
+                abi.encodeWithSignature("mint(address,uint256)", msg.sender, reward - address(this).balance)
+            );
+            require(success, "Minting failed");
         }
 
         emit Unstaked(msg.sender, amount, reward, penalty);
     }
 
     /**
-        * @dev Set lock time (Onwer only)
+        * @dev Set reward rate (Owner only)
+        * @param _rewardRate Reward rate
+    */
+    function setRewardRate(uint256 _rewardRate) external onlyOwner {
+        require(_rewardRate > 0, "Invalid reward rate");
+        rewardRate = _rewardRate;
+
+        emit RewardRateUpdated(_rewardRate);
+    }
+
+    /**
+        * @dev Set lock time (Owner only)
         * @param _lockTime Lock time in seconds
     */
     function setLockTime(uint256 _lockTime) external onlyOwner {
         lockTime = _lockTime;
+
+        emit LockTimeUpdated(_lockTime);
     }
 
     /**
-        * @dev Set penalty percent (Onwer only)
+        * @dev Set penalty percent (Owner only)
         * @param _penaltyPercent Penalty percent
     */
     function setPenaltyPercent(uint256 _penaltyPercent) external onlyOwner {
         require(_penaltyPercent <= 100, "Invalid percentage");
         penaltyPercent = _penaltyPercent;
+
+        emit PenaltyPercentUpdated(_penaltyPercent);
     }
 }
