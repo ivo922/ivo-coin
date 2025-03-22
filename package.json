@@ -2,5 +2,8 @@
   "devDependencies": {
     "prettier": "^3.5.0",
     "prettier-plugin-solidity": "^1.4.2"
+  },
+  "scripts": {
+    "coverage": "forge coverage --report lcov && genhtml lcov.info --branch-coverage --output-dir coverage"
   }
 }

@@ -15,3 +15,13 @@ docs/
 
 # Node modules
 node_modules/
+
+# Coverage
+coverage_report/
+coverage/
+
+# Other
+*.info
+package-lock.json
+yarn.lock
+
