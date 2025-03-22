@@ -24,6 +24,8 @@ contract StakingWithPenalty is Ownable {
     event LockTimeUpdated(uint256 newLockTime);
     event PenaltyPercentUpdated(uint256 newPenaltyPercent);
 
+    error MintingFailed();
+
     constructor(address _stakingToken) Ownable(msg.sender) {
         stakingToken = IERC20(_stakingToken); // Initialize staking token
     }
@@ -80,22 +82,28 @@ contract StakingWithPenalty is Ownable {
         delete stakes[msg.sender];
 
         // Transfer tokens & rewards
-        if (address(this).balance > amount) {
-            stakingToken.transfer(msg.sender, amount);
+        if (stakingToken.balanceOf(address(this)) >= amount) {
+            stakingToken.transferFrom(address(this), msg.sender, amount);
         } else {
             (bool success, ) = address(stakingToken).call(
-                abi.encodeWithSignature("mint(address,uint256)", msg.sender, amount - address(this).balance)
+                abi.encodeWithSignature("mint(address,uint256)", msg.sender, amount - stakingToken.balanceOf(address(this)))
             );
-            require(success, "Minting failed");
+            if (!success) {
+                revert MintingFailed();
+            }
+            stakingToken.transferFrom(address(this), msg.sender, amount);
         }
 
-        if (reward > 0 && address(this).balance > reward) {
-            stakingToken.transfer(msg.sender, reward);
+        if (reward > 0 && stakingToken.balanceOf(address(this)) >= reward) {
+            stakingToken.transferFrom(address(this), msg.sender, reward);
         } else if (reward > 0) {
             (bool success, ) = address(stakingToken).call(
-                abi.encodeWithSignature("mint(address,uint256)", msg.sender, reward - address(this).balance)
+                abi.encodeWithSignature("mint(address,uint256)", msg.sender, reward - stakingToken.balanceOf(address(this)))
             );
-            require(success, "Minting failed");
+            if (!success) {
+                revert MintingFailed();
+            }
+            stakingToken.transferFrom(address(this), msg.sender, reward);
         }
 
         emit Unstaked(msg.sender, amount, reward, penalty);
