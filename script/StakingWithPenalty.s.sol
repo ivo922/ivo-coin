@@ -9,10 +9,10 @@ contract StakingWithPenaltyScript is Script {
 
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY"); // Load private key from env variable
-        address memory ivoCoinAddress = vm.envAddress("IVOCOIN_ADDRESS");
+        address ivoCoinAddress = vm.envAddress("IVOCOIN_ADDRESS");
         vm.startBroadcast(deployerPrivateKey); // Start broadcasting transactions
         StakingWithPenalty stakingContract = new StakingWithPenalty(ivoCoinAddress); // Deploy the contract with IvoCoin
         vm.stopBroadcast(); // Stop broadcasting
-        console.log("Deployed StakingWithPenalty at:", address(token)); // Print contract address
+        console.log("Deployed StakingWithPenalty at:", address(stakingContract)); // Print contract address
     }
 }
