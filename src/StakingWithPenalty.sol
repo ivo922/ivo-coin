@@ -4,6 +4,10 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+interface IMintToken {
+    function mint(address to, uint256 amount) external;
+}
+
 contract StakingWithPenalty is Ownable {
     IERC20 public stakingToken;
     uint256 public rewardRate = 100; // Reward per token staked per second
@@ -78,33 +82,16 @@ contract StakingWithPenalty is Ownable {
             amount -= penalty; // Reduce amount by penalty
         }
 
+        uint256 amountToUnstake = reward + amount;
+
         // Reset stake
         delete stakes[msg.sender];
 
         // Transfer tokens & rewards
-        if (stakingToken.balanceOf(address(this)) >= amount) {
-            stakingToken.transferFrom(address(this), msg.sender, amount);
-        } else {
-            (bool success, ) = address(stakingToken).call(
-                abi.encodeWithSignature("mint(address,uint256)", msg.sender, amount - stakingToken.balanceOf(address(this)))
-            );
-            if (!success) {
-                revert MintingFailed();
-            }
-            stakingToken.transferFrom(address(this), msg.sender, amount);
+        if (stakingToken.balanceOf(address(this)) < amountToUnstake) {
+            IMintToken(address(stakingToken)).mint(address(this), amountToUnstake - stakingToken.balanceOf(address(this)));
         }
-
-        if (reward > 0 && stakingToken.balanceOf(address(this)) >= reward) {
-            stakingToken.transferFrom(address(this), msg.sender, reward);
-        } else if (reward > 0) {
-            (bool success, ) = address(stakingToken).call(
-                abi.encodeWithSignature("mint(address,uint256)", msg.sender, reward - stakingToken.balanceOf(address(this)))
-            );
-            if (!success) {
-                revert MintingFailed();
-            }
-            stakingToken.transferFrom(address(this), msg.sender, reward);
-        }
+        stakingToken.transfer(msg.sender, amountToUnstake);
 
         emit Unstaked(msg.sender, amount, reward, penalty);
     }
