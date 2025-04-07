@@ -63,19 +63,20 @@ contract AdvancedStaking is Ownable {
         pool.lastRewardBlock = block.number;
     }
 
+    // ? Mint reward for newly staked tokens?
     function deposit(uint256 _pid, uint256 _amount) external {
         PoolInfo storage pool = pools[_pid];
         UserInfo storage user = userStakes[_pid][msg.sender];
 
-        pool.lpToken.transferFrom(msg.sender, address(this), _amount);
         updatePool(_pid);
 
-
-        // ? Mint reward for newly staked tokens?
-        rewardToken.mint(msg.sender, user.amount - user.rewardDebt / 1e12);
-
+        pool.lpToken.transferFrom(msg.sender, address(this), _amount);
+        uint256 pending = (user.amount * pool.accRewardPerToken) / 1e12 - user.rewardDebt;
+        if (pending > 0) {
+            rewardToken.mint(msg.sender, pending);
+        }
+        user.rewardDebt += (user.amount * pool.accRewardPerToken) / 1e12;
         user.amount += _amount;
-        user.rewardDebt += (_amount * pool.accRewardPerToken) / 1e12;
     }
 
     function withdraw(uint256 _pid, uint256 _amount) external {
@@ -90,6 +91,8 @@ contract AdvancedStaking is Ownable {
         if (pending > 0) {
             rewardToken.mint(msg.sender, pending);
         }
+
+        user.amount += _amount;
 
         pool.lpToken.transfer(msg.sender, _amount);
         user.amount -= _amount;
