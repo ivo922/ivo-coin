@@ -3,9 +3,18 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./IvoCoin.sol";
 
-contract AdvancedStaking is Ownable {
+using SafeERC20 for IERC20;
+
+
+interface IMintToken {
+    function mint(address to, uint256 amount) external;
+}
+
+contract AdvancedStaking is Ownable, ReentrancyGuard {
     struct PoolInfo {
         IERC20 lpToken; // Address of LP token contract.
         uint256 rewardRate; // Reward tokens to distribute per block.
@@ -20,14 +29,15 @@ contract AdvancedStaking is Ownable {
 
     IERC20 public rewardToken;
 
-    mapping(uint256 => Pool) public pools;
+    mapping(uint256 => PoolInfo) public pools;
     mapping(uint256 => mapping(address => UserInfo)) public userStakes;
     uint256 public totalPools;
 
+    event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
+    event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
+    event PoolAdded(uint256 indexed pid, address lpToken, uint256 rewardRate);
 
-    constructor(
-        IERC25 _rewardToken
-    ) public Ownable(msg.sender) {
+    constructor(IERC20 _rewardToken) {
         rewardToken = _rewardToken;
     }
 
@@ -40,7 +50,7 @@ contract AdvancedStaking is Ownable {
         * @notice The function updates the total number of pools.
     */
     function addPool(IERC20 _lpToken, uint256 _rewardRate) external onlyOwner {
-        pools[totalPools] = Pool(
+        pools[totalPools] = PoolInfo(
             {
                 lpToken: _lpToken,
                 rewardRate: _rewardRate,
@@ -49,6 +59,7 @@ contract AdvancedStaking is Ownable {
             }
         );
         totalPools++;
+        emit PoolAdded(totalPools - 1, address(_lpToken), _rewardRate);
     }
 
     function updatePool(uint256 _pid) public {
@@ -59,43 +70,65 @@ contract AdvancedStaking is Ownable {
         uint256 totalSupply = pool.lpToken.balanceOf(address(this));
         uint256 multiplier = block.number - pool.lastRewardBlock;
         uint256 reward = multiplier * pool.rewardRate;
+
+        if (totalSupply == 0) {
+            pool.lastRewardBlock = block.number;
+            return;
+        }
+
         pool.accRewardPerToken += (reward * 1e12) / totalSupply;
-        pool.lastRewardBlock = block.number;
     }
 
     // ? Mint reward for newly staked tokens?
-    function deposit(uint256 _pid, uint256 _amount) external {
+    function deposit(uint256 _pid, uint256 _amount) external nonReentrant {
         PoolInfo storage pool = pools[_pid];
         UserInfo storage user = userStakes[_pid][msg.sender];
 
         updatePool(_pid);
 
-        pool.lpToken.transferFrom(msg.sender, address(this), _amount);
-        uint256 pending = (user.amount * pool.accRewardPerToken) / 1e12 - user.rewardDebt;
+        pool.lpToken.safeTransferFrom(msg.sender, address(this), _amount);
+
+        uint256 pending = pendingReward(_pid, msg.sender);
         if (pending > 0) {
-            rewardToken.mint(msg.sender, pending);
+            IMintToken(address(rewardToken)).mint(msg.sender, pending);
         }
-        user.rewardDebt += (user.amount * pool.accRewardPerToken) / 1e12;
+
         user.amount += _amount;
+        user.rewardDebt = (user.amount * pool.accRewardPerToken) / 1e12;
+
+        emit Deposit(msg.sender, _pid, _amount);
     }
 
-    function withdraw(uint256 _pid, uint256 _amount) external {
+    function withdraw(uint256 _pid, uint256 _amount) external nonReentrant {
         PoolInfo storage pool = pools[_pid];
         UserInfo storage user = userStakes[_pid][msg.sender];
         require(user.amount >= _amount, "withdraw: not good");
 
         updatePool(_pid);
 
-        uint256 pending = (user.amount * pool.accRewardPerToken) / 1e12 - user.rewardDebt;
-
+        uint256 pending = pendingReward(_pid, msg.sender);
         if (pending > 0) {
-            rewardToken.mint(msg.sender, pending);
+            IMintToken(address(rewardToken)).mint(msg.sender, pending);
         }
-
-        user.amount += _amount;
 
         pool.lpToken.transfer(msg.sender, _amount);
         user.amount -= _amount;
-        user.rewardDebt = (_amount * pool.accRewardPerToken) / 1e12;
+        user.rewardDebt = (user.amount * pool.accRewardPerToken) / 1e12;
+
+        emit Withdraw(msg.sender, _pid, _amount);
+    }
+
+    function pendingReward(uint256 _pid, address _user) public view returns (uint256) {
+        PoolInfo memory pool = pools[_pid];
+        UserInfo memory user = userStakes[_pid][_user];
+        uint256 accRewardPerToken = pool.accRewardPerToken;
+        uint256 totalSupply = pool.lpToken.balanceOf(address(this));
+
+        if (block.number > pool.lastRewardBlock && totalSupply != 0) {
+            uint256 multiplier = block.number - pool.lastRewardBlock;
+            uint256 reward = multiplier * pool.rewardRate;
+            accRewardPerToken += (reward * 1e12) / totalSupply;
+        }
+        return (user.amount * accRewardPerToken) / 1e12 - user.rewardDebt;
     }
 }
