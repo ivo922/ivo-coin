@@ -37,7 +37,7 @@ contract AdvancedStaking is Ownable, ReentrancyGuard {
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event PoolAdded(uint256 indexed pid, address lpToken, uint256 rewardRate);
 
-    constructor(IERC20 _rewardToken) {
+    constructor(IERC20 _rewardToken) Ownable(msg.sender) {
         rewardToken = _rewardToken;
     }
 
@@ -71,12 +71,13 @@ contract AdvancedStaking is Ownable, ReentrancyGuard {
         uint256 multiplier = block.number - pool.lastRewardBlock;
         uint256 reward = multiplier * pool.rewardRate;
 
+        pool.lastRewardBlock = block.number;
+
         if (totalSupply == 0) {
-            pool.lastRewardBlock = block.number;
             return;
         }
 
-        pool.accRewardPerToken += (reward * 1e12) / totalSupply;
+        pool.accRewardPerToken = (reward * 1e12) / totalSupply;
     }
 
     // ? Mint reward for newly staked tokens?
@@ -88,13 +89,7 @@ contract AdvancedStaking is Ownable, ReentrancyGuard {
 
         pool.lpToken.safeTransferFrom(msg.sender, address(this), _amount);
 
-        uint256 pending = pendingReward(_pid, msg.sender);
-        if (pending > 0) {
-            IMintToken(address(rewardToken)).mint(msg.sender, pending);
-        }
-
         user.amount += _amount;
-        user.rewardDebt = (user.amount * pool.accRewardPerToken) / 1e12;
 
         emit Deposit(msg.sender, _pid, _amount);
     }
@@ -105,30 +100,33 @@ contract AdvancedStaking is Ownable, ReentrancyGuard {
         require(user.amount >= _amount, "withdraw: not good");
 
         updatePool(_pid);
+        withdrawReward(_pid);
+
+        if (_amount > 0) {
+            user.amount -= _amount;
+            pool.lpToken.safeTransfer(msg.sender, _amount);
+        }
+
+        emit Withdraw(msg.sender, _pid, _amount);
+    }
+
+    function withdrawReward(uint256 _pid) private {
+        PoolInfo memory pool = pools[_pid];
+        UserInfo storage user = userStakes[_pid][msg.sender];
+
+        updatePool(_pid);
 
         uint256 pending = pendingReward(_pid, msg.sender);
         if (pending > 0) {
             IMintToken(address(rewardToken)).mint(msg.sender, pending);
+            user.rewardDebt = (user.amount * pool.accRewardPerToken) / 1e12;
         }
-
-        pool.lpToken.transfer(msg.sender, _amount);
-        user.amount -= _amount;
-        user.rewardDebt = (user.amount * pool.accRewardPerToken) / 1e12;
-
-        emit Withdraw(msg.sender, _pid, _amount);
     }
 
     function pendingReward(uint256 _pid, address _user) public view returns (uint256) {
         PoolInfo memory pool = pools[_pid];
         UserInfo memory user = userStakes[_pid][_user];
-        uint256 accRewardPerToken = pool.accRewardPerToken;
-        uint256 totalSupply = pool.lpToken.balanceOf(address(this));
 
-        if (block.number > pool.lastRewardBlock && totalSupply != 0) {
-            uint256 multiplier = block.number - pool.lastRewardBlock;
-            uint256 reward = multiplier * pool.rewardRate;
-            accRewardPerToken += (reward * 1e12) / totalSupply;
-        }
-        return (user.amount * accRewardPerToken) / 1e12 - user.rewardDebt;
+        return (user.amount * pool.accRewardPerToken) / 1e12 - user.rewardDebt;
     }
 }
