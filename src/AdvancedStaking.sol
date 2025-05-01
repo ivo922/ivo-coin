@@ -68,7 +68,9 @@ contract AdvancedStaking is Ownable, ReentrancyGuard {
             return;
         }
         uint256 totalSupply = pool.lpToken.balanceOf(address(this));
-        uint256 multiplier = block.number - pool.lastRewardBlock;
+
+        // -------------------------------
+        uint256 multiplier = block.number;
         uint256 reward = multiplier * pool.rewardRate;
 
         pool.lastRewardBlock = block.number;
@@ -78,19 +80,37 @@ contract AdvancedStaking is Ownable, ReentrancyGuard {
         }
 
         pool.accRewardPerToken = (reward * 1e12) / totalSupply;
+
+
+        // ------------------------------
+        // todo : fix this shit
+        // uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
+        // uint256 sushiReward =
+        //     multiplier.mul(sushiPerBlock).mul(pool.allocPoint).div(
+        //         totalAllocPoint
+        //     );
+        // sushi.mint(devaddr, sushiReward.div(10));
+        // sushi.mint(address(this), sushiReward);
+        // pool.accSushiPerShare = pool.accSushiPerShare.add(
+        //     sushiReward.mul(1e12).div(lpSupply)
+        // );
+        // pool.lastRewardBlock = block.number;
     }
 
-    // ? Mint reward for newly staked tokens?
     function deposit(uint256 _pid, uint256 _amount) external nonReentrant {
         PoolInfo storage pool = pools[_pid];
         UserInfo storage user = userStakes[_pid][msg.sender];
-
         updatePool(_pid);
-
-        pool.lpToken.safeTransferFrom(msg.sender, address(this), _amount);
-
+        if (user.amount > 0) {
+            withdrawReward(_pid);
+        }
+        pool.lpToken.safeTransferFrom(
+            msg.sender,
+            address(this),
+            _amount
+        );
         user.amount += _amount;
-
+        user.rewardDebt = (user.amount * pool.accRewardPerToken) / 1e12;
         emit Deposit(msg.sender, _pid, _amount);
     }
 
@@ -98,28 +118,17 @@ contract AdvancedStaking is Ownable, ReentrancyGuard {
         PoolInfo storage pool = pools[_pid];
         UserInfo storage user = userStakes[_pid][msg.sender];
         require(user.amount >= _amount, "withdraw: not good");
-
         updatePool(_pid);
         withdrawReward(_pid);
-
-        if (_amount > 0) {
-            user.amount -= _amount;
-            pool.lpToken.safeTransfer(msg.sender, _amount);
-        }
-
+        user.amount -= _amount;
+        user.rewardDebt = (user.amount * pool.accRewardPerToken) / 1e12;
+        pool.lpToken.safeTransfer(msg.sender, _amount);
         emit Withdraw(msg.sender, _pid, _amount);
     }
-
     function withdrawReward(uint256 _pid) private {
-        PoolInfo memory pool = pools[_pid];
-        UserInfo storage user = userStakes[_pid][msg.sender];
-
-        updatePool(_pid);
-
         uint256 pending = pendingReward(_pid, msg.sender);
         if (pending > 0) {
             IMintToken(address(rewardToken)).mint(msg.sender, pending);
-            user.rewardDebt = (user.amount * pool.accRewardPerToken) / 1e12;
         }
     }
 
