@@ -4,11 +4,10 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "../src/AdvancedStaking.sol";
-import "../src/IvoCoin.sol";
 
 contract AdvancedStakingTest is Test {
-  IvoCoin rewardToken;
-  IvoCoin lpToken;
+  RewardToken rewardToken;
+  StakingToken stakingToken;
   AdvancedStaking staking;
 
   address owner = address(0xABCD);
@@ -21,18 +20,18 @@ contract AdvancedStakingTest is Test {
 
   function setUp() public {
     vm.startPrank(owner);
-    rewardToken = new IvoCoin(10000);
-    lpToken = new IvoCoin(10000);
+    rewardToken = new RewardToken(10000);
+    stakingToken = new StakingToken(10000);
     staking = new AdvancedStaking(IERC20(address(rewardToken)));
     rewardToken.setMinter(address(staking));
 
-    lpToken.mint(user, 1000);
+    stakingToken.mint(user, 1000 * (10 ** stakingToken.decimals()));
 
-    staking.addPool(IERC20(address(lpToken)), 1);
+    staking.addPool(IERC20(address(stakingToken)), 1);
 
-    lpToken.mint(user1, 1000);
-    lpToken.mint(user2, 1000);
-    lpToken.mint(user3, 1000);
+    stakingToken.mint(user1, 1000 * (10 ** stakingToken.decimals()));
+    stakingToken.mint(user2, 1000 * (10 ** stakingToken.decimals()));
+    stakingToken.mint(user3, 1000 * (10 ** stakingToken.decimals()));
 
     vm.stopPrank();
   }
@@ -40,7 +39,7 @@ contract AdvancedStakingTest is Test {
   function testDepositAndWithdraw() public {
     vm.startPrank(user);
 
-    lpToken.approve(address(staking), 1000);
+    stakingToken.approve(address(staking), 1000);
     // Deposit 100 tokens into the first pool
     staking.deposit(0, 100);
 
@@ -68,7 +67,7 @@ contract AdvancedStakingTest is Test {
   function testMultiUserDepositsAndWithdrawsOverTime() public {
     // user1 deposits at block 1
     vm.startPrank(user1);
-    lpToken.approve(address(staking), 1000);
+    stakingToken.approve(address(staking), 1000);
     staking.deposit(0, 100);
     vm.stopPrank();
 
@@ -81,7 +80,7 @@ contract AdvancedStakingTest is Test {
       User2 will start staking at block 11
      */
     vm.startPrank(user2);
-    lpToken.approve(address(staking), 1000);
+    stakingToken.approve(address(staking), 1000);
     staking.deposit(0, 100);
     vm.stopPrank();
 
@@ -94,7 +93,7 @@ contract AdvancedStakingTest is Test {
       User3 will start staking at block 31
      */
     vm.startPrank(user3);
-    lpToken.approve(address(staking), 1000);
+    stakingToken.approve(address(staking), 1000);
     staking.deposit(0, 100);
     vm.stopPrank();
 
@@ -138,5 +137,24 @@ contract AdvancedStakingTest is Test {
     assertGt(r2, 0);
     assertGt(r3, 0);
     assertApproxEqAbs(r1 + r2 + r3, 99, 1); // ±1 margin
+  }
+
+  function testWeirdDecimals() public {
+    vm.startPrank(user);
+
+    stakingToken.approve(address(staking), 1000 * (10 ** stakingToken.decimals()));
+
+    staking.deposit(0, 1000 * (10 ** stakingToken.decimals()));
+
+    for (uint256 index = 0; index < 100; index++) {
+      vm.roll(block.number + 1);
+      staking.updatePool(0);
+    }
+
+    staking.withdraw(0, 1000 * (10 ** stakingToken.decimals()));
+    vm.stopPrank();
+
+    console.log("Reward balance after withdrawal: ", rewardToken.balanceOf(user));
+    assertGt(rewardToken.balanceOf(user), 0);
   }
 }

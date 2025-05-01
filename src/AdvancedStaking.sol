@@ -16,7 +16,7 @@ interface IMintToken {
 
 contract AdvancedStaking is Ownable, ReentrancyGuard {
     struct PoolInfo {
-        IERC20 lpToken; // Address of LP token contract.
+        IERC20 stakingToken; // Address of LP token contract.
         uint256 rewardRate; // Reward tokens to distribute per block.
         uint256 lastRewardBlock; // Last block number that reward tokens distribution occurs.
         uint256 accRewardPerToken; // Accumulated reward tokens per share, times 1e12.
@@ -35,7 +35,7 @@ contract AdvancedStaking is Ownable, ReentrancyGuard {
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
-    event PoolAdded(uint256 indexed pid, address lpToken, uint256 rewardRate);
+    event PoolAdded(uint256 indexed pid, address stakingToken, uint256 rewardRate);
 
     constructor(IERC20 _rewardToken) Ownable(msg.sender) {
         rewardToken = _rewardToken;
@@ -43,23 +43,23 @@ contract AdvancedStaking is Ownable, ReentrancyGuard {
 
     /**
         * @dev Add a new LP to the pool. Can only be called by the owner.
-        * @param _lpToken The address of the LP token contract.
+        * @param _stakingToken The address of the LP token contract.
         * @param _rewardRate The rate at which rewards are distributed.
         * @notice This function can only be called by the contract owner.
         * @notice This function is used to add a new pool for staking.
         * @notice The function updates the total number of pools.
     */
-    function addPool(IERC20 _lpToken, uint256 _rewardRate) external onlyOwner {
+    function addPool(IERC20 _stakingToken, uint256 _rewardRate) external onlyOwner {
         pools[totalPools] = PoolInfo(
             {
-                lpToken: _lpToken,
+                stakingToken: _stakingToken,
                 rewardRate: _rewardRate,
                 lastRewardBlock: block.number,
                 accRewardPerToken: 0
             }
         );
         totalPools++;
-        emit PoolAdded(totalPools - 1, address(_lpToken), _rewardRate);
+        emit PoolAdded(totalPools - 1, address(_stakingToken), _rewardRate);
     }
 
     function updatePool(uint256 _pid) public {
@@ -67,10 +67,8 @@ contract AdvancedStaking is Ownable, ReentrancyGuard {
         if (block.number <= pool.lastRewardBlock) {
             return;
         }
-        uint256 totalSupply = pool.lpToken.balanceOf(address(this));
-
-        // -------------------------------
-        uint256 multiplier = block.number;
+        uint256 totalSupply = pool.stakingToken.balanceOf(address(this));
+        uint256 multiplier = block.number - pool.lastRewardBlock;
         uint256 reward = multiplier * pool.rewardRate;
 
         pool.lastRewardBlock = block.number;
@@ -79,22 +77,7 @@ contract AdvancedStaking is Ownable, ReentrancyGuard {
             return;
         }
 
-        pool.accRewardPerToken = (reward * 1e12) / totalSupply;
-
-
-        // ------------------------------
-        // todo : fix this shit
-        // uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
-        // uint256 sushiReward =
-        //     multiplier.mul(sushiPerBlock).mul(pool.allocPoint).div(
-        //         totalAllocPoint
-        //     );
-        // sushi.mint(devaddr, sushiReward.div(10));
-        // sushi.mint(address(this), sushiReward);
-        // pool.accSushiPerShare = pool.accSushiPerShare.add(
-        //     sushiReward.mul(1e12).div(lpSupply)
-        // );
-        // pool.lastRewardBlock = block.number;
+        pool.accRewardPerToken += (reward * 1e12) / totalSupply;
     }
 
     function deposit(uint256 _pid, uint256 _amount) external nonReentrant {
@@ -104,7 +87,7 @@ contract AdvancedStaking is Ownable, ReentrancyGuard {
         if (user.amount > 0) {
             withdrawReward(_pid);
         }
-        pool.lpToken.safeTransferFrom(
+        pool.stakingToken.safeTransferFrom(
             msg.sender,
             address(this),
             _amount
@@ -122,7 +105,7 @@ contract AdvancedStaking is Ownable, ReentrancyGuard {
         withdrawReward(_pid);
         user.amount -= _amount;
         user.rewardDebt = (user.amount * pool.accRewardPerToken) / 1e12;
-        pool.lpToken.safeTransfer(msg.sender, _amount);
+        pool.stakingToken.safeTransfer(msg.sender, _amount);
         emit Withdraw(msg.sender, _pid, _amount);
     }
     function withdrawReward(uint256 _pid) private {
@@ -139,3 +122,19 @@ contract AdvancedStaking is Ownable, ReentrancyGuard {
         return (user.amount * pool.accRewardPerToken) / 1e12 - user.rewardDebt;
     }
 }
+
+// ----------------------------------
+
+contract RewardToken is IvoCoin {
+    constructor(uint256 initialSupply) IvoCoin(initialSupply) {}
+    function decimals() public view virtual override returns (uint8) {
+        return 12;
+    }
+}
+
+contract StakingToken is IvoCoin {
+    constructor(uint256 initialSupply) IvoCoin(initialSupply) {}
+    function decimals() public view virtual override returns (uint8) {
+        return 18;
+    }
+  }
